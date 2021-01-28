@@ -1,0 +1,65 @@
+
+##################################################
+## Prerequisites:
+## - $DOCKER_USERNAME and $DOCKER_PASSWORD must
+##   be set in the project settings in Travis-CI
+##   and their values must be properly escaped
+##   for bash.
+## - $DOCKERHUB_ORGANIZATION must be set in the
+##   project settings in Travis-CI. This should
+##   be the organization or user to use for
+##   publishing images.
+##################################################
+sudo: required
+language: bash
+services:
+  - docker
+env:
+  global:
+    - DOCKERHUB_ORGANIZATION=someblackmagic
+    - APP_NAME=smtp-fake-server
+    # Used for specifying the build context relative to this file
+    # Likely, this is "."
+    - CONTEXT_RELATIVE_PATH=.docker/
+
+    # Relative path from $CONTEXT_RELATIVE_PATH to target Dockerfile
+    # Examples: "src/App/Dockerfile", "Dockerfile"
+    - DOCKERFILE_RELATIVE_PATH=.docker/Dockerfile
+
+    # Image name and tag used for CI only
+    - CI_IMAGE=${APP_NAME}:ci #DO NOT CHANGE
+
+    # Published image base name (user/image) without tag
+    # Correct tag is added later
+    - BASE_IMAGE=${DOCKERHUB_ORGANIZATION}/${APP_NAME} #DO NOT CHANGE
+
+script:
+  - docker build -t $CI_IMAGE -f $DOCKERFILE_RELATIVE_PATH $CONTEXT_RELATIVE_PATH
+after_success:
+  # Tag pull request builds with ":pr-XXX" where "XXX" is the pull request number
+  - |
+    if [ "${TRAVIS_PULL_REQUEST}" != "false" ]; then
+      echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
+      docker tag $CI_IMAGE ${DOCKERHUB_ORGANIZATION}/${APP_NAME}:pr-${TRAVIS_PULL_REQUEST};
+      docker push ${DOCKERHUB_ORGANIZATION}/${APP_NAME}:pr-${TRAVIS_PULL_REQUEST}
+    fi
+  # Tag git tag builds with the git tag
+  - |
+    if [ -n "$TRAVIS_TAG" ]; then
+      echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
+      docker tag $CI_IMAGE ${DOCKERHUB_ORGANIZATION}/${APP_NAME}:${TRAVIS_TAG}
+      docker push ${DOCKERHUB_ORGANIZATION}/${APP_NAME}:${TRAVIS_TAG}
+    fi
+  # Tag pushes on master with ":latest"
+  - |
+    if [ "$TRAVIS_BRANCH" = "master" -a "$TRAVIS_PULL_REQUEST" = "false" ]; then
+      echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
+      docker tag $CI_IMAGE ${DOCKERHUB_ORGANIZATION}/${APP_NAME}:latest
+      docker push ${DOCKERHUB_ORGANIZATION}/${APP_NAME}:latest
+      docker run -v $PWD:/workspace \
+        -e DOCKERHUB_USERNAME=$DOCKER_USERNAME \
+        -e DOCKERHUB_PASSWORD=$DOCKER_PASSWORD \
+        -e DOCKERHUB_REPOSITORY=${DOCKERHUB_ORGANIZATION}/${APP_NAME} \
+        -e README_FILEPATH='/workspace/.docker/dockerhub.md' \
+        peterevans/dockerhub-description:2.1.0
+    fi
